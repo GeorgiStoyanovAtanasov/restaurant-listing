@@ -68,12 +68,18 @@ pipeline {
 
 
       stage('Docker Build and Push') {
-      steps {
-          sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
-          sh 'docker build -t ngng7/restaurant-listing-service:${VERSION} .'
-          sh 'docker push ngng7/restaurant-listing-service:${VERSION}'
+          steps {
+              withCredentials([usernamePassword(credentialsId: 'DOCKER_HUB_CREDENTIAL',
+                                                passwordVariable: 'DOCKER_PASSWORD',
+                                                usernameVariable: 'DOCKER_USERNAME')]) {
+                  sh """
+                      echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+                      docker build -t ngng7/restaurant-listing-service:${VERSION} .
+                      docker push ngng7/restaurant-listing-service:${VERSION}
+                  """
+              }
+          }
       }
-    } 
 
 
      stage('Cleanup Workspace') {
