@@ -2,9 +2,8 @@ pipeline {
   agent any
 
   environment {
-    DOCKERHUB_CREDENTIALS = credentials('DOCKER_HUB_CREDENTIAL')
+    DOCKER_CREDS = credentials('DOCKER_HUB_CREDENTIAL')  // Creates DOCKER_CREDS_USR and DOCKER_CREDS_PSW
     VERSION = "${env.BUILD_ID}"
-
   }
 
   tools {
@@ -13,104 +12,88 @@ pipeline {
 
   stages {
 
-    stage('Maven Build'){
-        steps{
-        sh 'mvn clean package  -DskipTests'
-        }
+    stage('Maven Build') {
+      steps {
+        sh 'mvn clean package -DskipTests'
+      }
     }
 
-     stage('Run Tests') {
+    stage('Run Tests') {
       steps {
         sh 'mvn test -Dspring.profiles.active=test'
       }
     }
 
     stage('SonarQube Analysis') {
-  steps {
-    sh 'mvn clean verify sonar:sonar -Dspring.profiles.active=test  -Dsonar.host.url=http://16.171.159.232:9000/ -Dsonar.login=squ_529323b42e09f09edbda5668f69c19884c49aae0'
-  }
-}
+      steps {
+        sh 'mvn clean verify sonar:sonar -Dspring.profiles.active=test -Dsonar.host.url=http://16.171.159.232:9000/ -Dsonar.login=squ_529323b42e09f09edbda5668f69c19884c49aae0'
+      }
+    }
 
+    stage('Check code coverage') {
+      steps {
+        script {
+          def token = "squ_529323b42e09f09edbda5668f69c19884c49aae0"
+          def sonarQubeUrl = "http://16.171.159.232:9000/api"
+          def componentKey = "com.witcherhunter:restaurantlisting"
+          def coverageThreshold = 80.0
 
-   stage('Check code coverage') {
-            steps {
-                script {
-                    def token = "squ_529323b42e09f09edbda5668f69c19884c49aae0"
-                    def sonarQubeUrl = "http://16.171.159.232:9000/api"
-                    def componentKey = "com.witcherhunter"
-                    def coverageThreshold = 80.0
+          def response = sh(
+            script: "curl -H 'Authorization: Bearer ${token}' '${sonarQubeUrl}/measures/component?component=${componentKey}&metricKeys=coverage'",
+            returnStdout: true
+          ).trim()
 
-                    def response = sh (
-                        script: "curl -H 'Authorization: Bearer ${token}' '${sonarQubeUrl}/measures/component?component=${componentKey}&metricKeys=coverage'",
-                        returnStdout: true
-                    ).trim()
+          def coverageStr = sh(
+            script: "echo '${response}' | jq -r '.component.measures[0].value'",
+            returnStdout: true
+          ).trim()
 
-                    def coverageStr = sh (
-                        script: "echo '${response}' | jq -r '.component.measures[0].value'",
-                        returnStdout: true
-                    ).trim()
+          if (coverageStr == "null" || coverageStr == "") {
+            echo "No coverage reported for this build. Skipping coverage check."
+            return
+          }
 
-                    if (coverageStr == "null" || coverageStr == "") {
-                        echo "No coverage reported for this build. Skipping coverage check."
-                        return
-                    }
+          def coverage = coverageStr.toDouble()
+          echo "Coverage: ${coverage}"
 
-                    def coverage = coverageStr.toDouble()
-
-                    echo "Coverage: ${coverage}"
-
-                    if (coverage < coverageThreshold) {
-                        error "Coverage is below the threshold of ${coverageThreshold}%. Aborting the pipeline."
-                    }
-                }
-            }
-        } 
-
-
-      stage('Docker Build and Push') {
-        steps {
-          withCredentials([usernamePassword(credentialsId: 'DOCKER_HUB_CREDENTIAL',
-              passwordVariable: 'DOCKER_PASSWORD',
-              usernameVariable: 'DOCKER_USERNAME')]) {
-            sh '''
-              echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-              docker build -t ngng7/restaurant-listing-service:${VERSION} .
-              docker push ngng7/restaurant-listing-service:${VERSION}
-            '''
+          if (coverage < coverageThreshold) {
+            error "Coverage is below the threshold of ${coverageThreshold}%. Aborting the pipeline."
           }
         }
       }
+    }
 
-
-     stage('Cleanup Workspace') {
+    stage('Docker Build and Push') {
       steps {
-        deleteDir()
-       
+        sh '''
+          echo "$DOCKER_CREDS_PSW" | docker login -u "$DOCKER_CREDS_USR" --password-stdin
+          docker build -t ngng7/restaurant-listing-service:${VERSION} .
+          docker push ngng7/restaurant-listing-service:${VERSION}
+        '''
       }
     }
 
-
+    stage('Cleanup Workspace') {
+      steps {
+        deleteDir()
+      }
+    }
 
     stage('Update Image Tag in GitOps') {
       steps {
-         checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[ credentialsId: 'git-ssh', url: 'git@github.com:GeorgiStoyanovAtanasov/deployment-folder.git']])
+        checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[credentialsId: 'git-ssh', url: 'git@github.com:GeorgiStoyanovAtanasov/deployment-folder.git']])
         script {
-       sh '''
-          sed -i "s/image:.*/image: ngng7\\/restaurant-listing-service:${VERSION}/" aws/restaurant-manifest.yml
-        '''
+          sh '''
+            sed -i "s/image:.*/image: ngng7\\/restaurant-listing-service:${VERSION}/" aws/restaurant-manifest.yml
+          '''
           sh 'git checkout main'
           sh 'git add .'
           sh 'git commit -m "Update image tag"'
-        sshagent(['git-ssh'])
-            {
-                  sh('git push')
-            }
+          sshagent(['git-ssh']) {
+            sh('git push')
+          }
         }
       }
     }
-
   }
-
 }
-
-
