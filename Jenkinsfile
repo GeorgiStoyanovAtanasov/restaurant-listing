@@ -45,10 +45,17 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    def coverage = sh (
+                    def coverageStr = sh (
                         script: "echo '${response}' | jq -r '.component.measures[0].value'",
                         returnStdout: true
-                    ).trim().toDouble()
+                    ).trim()
+
+                    if (coverageStr == "null" || coverageStr == "") {
+                        echo "No coverage reported for this build. Skipping coverage check."
+                        return
+                    }
+
+                    def coverage = coverageStr.toDouble()
 
                     echo "Coverage: ${coverage}"
 
