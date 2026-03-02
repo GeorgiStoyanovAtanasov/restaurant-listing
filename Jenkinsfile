@@ -69,11 +69,14 @@ pipeline {
 
       stage('Docker Build and Push') {
           steps {
-              withCredentials([usernamePassword(credentialsId: 'DOCKER_HUB_CREDENTIAL',
-                                                passwordVariable: 'DOCKER_PASSWORD',
-                                                usernameVariable: 'DOCKER_USERNAME')]) {
+              withCredentials([usernamePassword(
+                  credentialsId: 'DOCKER_HUB_CREDENTIAL',
+                  usernameVariable: 'DOCKER_USERNAME',
+                  passwordVariable: 'DOCKER_PASSWORD')]) {
+
+                  // Use triple quotes so Groovy interpolates variables
                   sh """
-                      echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+                      echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USERNAME" --password-stdin
                       docker build -t ngng7/restaurant-listing-service:${VERSION} .
                       docker push ngng7/restaurant-listing-service:${VERSION}
                   """
